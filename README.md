@@ -1,200 +1,175 @@
-# GCP Continuous Deployment for Labware Flask API
+# Labware Tracker: Flask Web Application with Continuous Deployment
 
-This repository contains a simple Flask web application demonstrating the Continuous Deployment (CD) pipeline on Google Cloud Platform (GCP) Compute Engine instances using Docker and GitHub workflows.
+This repository hosts the Flask-based web application for tracking labware in a biomedical environment. It leverages **Continuous Deployment (CD)** to deploy the application to a **Google Cloud Platform (GCP)** Virtual Machine (VM) using **Docker** and **GitHub Actions**.
 
-## Prerequisites
+### Steps for Deploying a Google Cloud Platform (GCP) Virtual Machine
 
-Before starting, ensure that the following are configured in your Google Cloud Platform (GCP) environment:
+This section outlines the **deployment plan** for creating a GCP VM and deploying the Flask application within a CI/CD pipeline.
 
-1. **GCP Instance and VPC Network**:
+#### **1. GCP VM Setup Using Terraform (Infrastructure as Code)**
 
-   * The GCP instance should allow HTTP(S) traffic on port 5000 to expose the container and enable SSH access using the `gcloud compute ssh` command.
-   * You can either create a VM instance manually or use this [Terraform repository](https://github.com/warestack/terraform-gcp-compute-instance) to provision the necessary resources.
+To automate the creation of the GCP VM, I have used **Terraform**, a tool that allows us to define the infrastructure in a configuration file and alter it automatically. Follow the steps below to change the GCP resources:
 
-2. **Google Cloud Project**:
+* Clone the Terraform GCP Compute Instance repository or use the following Terraform script to create the VM on GCP:
 
-   * Ensure your GCP project is set up and the Compute Engine API is enabled.
+```hcl
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
 
-## Setting Up Your Local Development Environment
+resource "google_compute_instance" "labware-instance" {
+  name         = "labware-instance"
+  machine_type = "e2-medium"
+  zone         = var.zone
+  boot_disk {
+    initialize_params {
+      image = "ubuntu-2004-focal-v20210701"
+    }
+  }
+  network_interface {
+    network = "default"
+    access_config {
+      // Ephemeral IP
+    }
+  }
 
-### 1. Create a Simple Flask Application
+  metadata_startup_script = <<-EOT
+    #! /bin/bash
+    sudo apt-get update
+    sudo apt-get install docker.io -y
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    sudo docker run -d -p 5000:5000 labware-tracker:latest
+  EOT
+}
 
-Create a Python script `app.py` with the following code to implement a basic Flask API for managing labware data:
-
-```python
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
-
-# In-memory data store for labware info
-labware_data = {}
-
-@app.route('/labware', methods=['GET'])
-def get_labware():
-    # Returns the labware information
-    return jsonify(labware_data), 200
-
-@app.route('/labware', methods=['POST'])
-def add_labware():
-    # Gets the data sent in the POST request
-    new_labware = request.get_json()
-
-    # Validate labware name and type
-    if not new_labware.get('name') or not new_labware.get('type'):
-        return jsonify({'error': 'Missing labware name or type'}), 400
-
-    # Add the new labware to the data store
-    labware_id = len(labware_data) + 1  # Generate ID based on current length
-    labware_data[labware_id] = new_labware
-
-    return jsonify({'message': 'Labware added successfully', 'id': labware_id}), 201
-
-if __name__ == '__main__':
-    app.run(debug=True)
+output "instance_ip" {
+  value = google_compute_instance.labware-instance.network_interface[0].access_config[0].nat_ip
+}
 ```
 
-This Flask application provides two endpoints:
+* Replace the `var.project_id`, `var.region`, and `var.zone` with your GCP project details.
+* Run `terraform apply` to create the instance.
 
-* `GET /labware` to retrieve the labware information.
-* `POST /labware` to add new labware data.
+This Terraform script will automatically create a VM and install Docker. It will then run the Flask application in a Docker container, exposing it on port 5000.
 
-### 2. Install Flask
+#### **2. Deploying the Flask Application on the GCP VM (Using Docker)**
 
-Ensure Flask is installed on your local machine by running:
+Once the VM is created, we deploy the Flask application using Docker, ensuring that the app runs in an isolated container.
 
-```bash
-pip install flask
-```
+##### Steps:
 
-You can then run the application:
+1. **SSH into the GCP VM**:
 
-```bash
-python3 app.py
-```
+   * Connect to the VM through SSH using the following command:
 
-### 3. Initialize a Git Repository
+     ```bash
+     gcloud compute ssh --project PROJECT_ID --zone ZONE VM_NAME
+     ```
+   * Alternatively, you can SSH directly from the GCP console.
 
-Set up version control using Git by following these steps:
-
-1. **Initialize Git** in your project folder:
+2. **Clone the GitHub repository** on the VM:
 
    ```bash
-   git init
+   git clone https://YOUR_GIT_USERNAME:YOUR_GIT_TOKEN@github.com/YOUR_USERNAME/LabwareTracker.git
+   cd LabwareTracker
    ```
 
-2. **Add a remote repository** (replace `YOUR_GIT_USERNAME` and `YOUR_GIT_REPO` with your actual GitHub username and repository):
+3. **Build the Docker image** for the Flask app:
 
    ```bash
-   git remote add origin https://YOUR_GIT_USERNAME:YOUR_GIT_TOKEN@YOUR_GIT_REPO
+   docker build -t labware-tracker .
    ```
 
-3. **Add and commit the files**:
+4. **Run the Docker container** on the VM, exposing the application on port 5000:
 
    ```bash
-   git add .
-   git commit -m "Initial commit - Flask app"
+   docker run -d -p 5000:5000 labware-tracker
    ```
 
-4. **Push the code** to GitHub:
+#### **3. CI/CD Pipeline with GitHub Actions**
 
-   ```bash
-   git push -f origin main
+Once the application is working on the VM, we use GitHub Actions to automate the deployment process every time changes are pushed to the `main` branch. This is accomplished by the following workflow:
+
+1. **Set up the Workflow**:
+
+   * Navigate to the **Actions** tab of this GitHub repository.
+   * Enable the **workflow** for **continuous deployment**.
+
+2. **Configure Secrets for GCP Authentication**:
+
+   * Encode your **Terraform Service Account** credentials (in JSON format) as a **BASE64** string.
+   * Add this as a GitHub secret named `GCP_TF_SA_CREDS_BASE64`.
+
+3. **Create a `build_and_deploy.yaml` file** inside the `.github/workflows` directory:
+
+   ```yaml
+   name: Setup, Build, Deploy and Publish
+
+   on:
+     push:
+       branches:
+         - 'main'
+     release:
+       types: [created]
+
+   jobs:
+     setup-build-deploy-publish:
+       name: Setup, Build, Deploy and Publish
+       runs-on: ubuntu-latest
+
+       environment: production
+       env:
+         PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+         GCP_ZONE: ${{ secrets.GCP_ZONE }}
+         INSTANCE_NAME: ${{ secrets.INSTANCE_NAME }}
+         IMAGE_NAME: labware-tracker
+         CONTAINER_NAME: labware-container
+         REPO_URL: ${{ secrets.REPO_URL }}
+       
+       steps:
+         - name: Checkout repository
+           uses: actions/checkout@v2
+
+         - name: Set up Docker
+           uses: docker/setup-buildx-action@v1
+
+         - name: Build Docker image
+           run: |
+             docker build -t ${{ env.IMAGE_NAME }} .
+
+         - name: Log in to GCP
+           uses: google-github-actions/auth@v0
+           with:
+             credentials_json: ${{ secrets.GCP_TF_SA_CREDS_BASE64 }}
+
+         - name: Push Docker image to Google Container Registry
+           run: |
+             docker tag ${{ env.IMAGE_NAME }} gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}
+             docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}
+
+         - name: Deploy to GCP VM
+           run: |
+             gcloud compute ssh --zone ${{ env.GCP_ZONE }} ${{ env.INSTANCE_NAME }} --command "docker pull gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }} && docker run -d -p 5000:5000 gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}"
    ```
 
-After pushing, you should be able to see your files in the GitHub repository.
+4. **Push changes** to GitHub:
+   Every time you push changes to the `main` branch, GitHub Actions will automatically:
 
-## Deploying the Flask Application on GCP VM (Manually)
+   * Build the Docker image
+   * Push it to Google Container Registry
+   * SSH into the GCP VM
+   * Pull the latest image and restart the container with the new code.
 
-### 1. Connect to Your GCP VM
+#### **4. Continuous Deployment Monitoring**
 
-SSH into your GCP VM instance. You can use either the terminal or the "SSH" button on the Google Cloud Console.
-
-### 2. Clone Your GitHub Repository
-
-Clone the repository containing the Flask application to your GCP VM:
-
-```bash
-git clone --branch main https://YOUR_GIT_USERNAME:YOUR_GIT_TOKEN@YOUR_GIT_REPO
-```
-
-### 3. Build the Docker Image
-
-Navigate to your cloned repository and create a Docker image for the Flask app:
-
-```bash
-cd flask-app
-docker build -t flask .
-```
-
-### 4. Run the Flask App in a Docker Container
-
-Run the Docker container on your VM and expose port 5000:
-
-```bash
-docker run -d -p 5000:5000 flask
-```
-
-You can now access the Flask application by navigating to `http://<VM_PUBLIC_IP>:5000`.
-
-## Continuous Deployment with GitHub Workflow
-
-To automate the deployment of your Flask application using GitHub Actions, follow these steps:
-
-### 1. Set Up GitHub Workflow
-
-Enable GitHub Actions in your repository. Navigate to the **Actions** tab and enable the workflow.
-
-### 2. Store Google Cloud Credentials
-
-Encode your Terraform service account JSON file in `BASE64` format and store it as a secret in GitHub, named `GCP_TF_SA_CREDS_BASE64`.
-
-### 3. Configure the GitHub Workflow
-
-Create a `build_and_deploy.yaml` file in `.github/workflows/`. The file will automate the deployment process. Here’s an example:
-
-```yaml
-name: Build and Deploy to GCP
-
-on:
-  push:
-    branches:
-      - main
-  release:
-    types: [created]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-      GCP_ZONE: ${{ secrets.GCP_ZONE }}
-      INSTANCE_NAME: ${{ secrets.INSTANCE_NAME }}
-      REPO_URL: ${{ secrets.REPO_URL }}
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
-
-    - name: Set up Google Cloud credentials
-      uses: google-github-actions/setup-gcloud@v0.2.0
-      with:
-        project_id: ${{ secrets.GCP_PROJECT_ID }}
-        credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
-
-    - name: SSH into VM and deploy
-      run: |
-        gcloud compute ssh ${{ secrets.INSTANCE_NAME }} --zone ${{ secrets.GCP_ZONE }} --command="cd /path/to/app && git pull && docker-compose up -d"
-```
-
-### 4. Monitor the Deployment
-
-After pushing changes to the main branch, the workflow will automatically trigger. You can monitor the progress of the deployment in the GitHub Actions tab.
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for more information.
+You can monitor the progress of the deployment and the state of the virtual machine through the **GitHub Actions** tab and GCP's **Compute Engine** dashboard. Any issues or failures in the pipeline will be visible in the Actions logs.
 
 ---
 
-Let me know if you need further adjustments!
+### Additional Notes:
+
+* If you prefer to manually set up the VM, skip the Terraform steps and follow the manual SSH and Docker steps instead.
+* This workflow ensures that changes to the codebase are automatically deployed without manual intervention, streamlining the deployment process for continuous integration and continuous delivery (CI/CD).
+
