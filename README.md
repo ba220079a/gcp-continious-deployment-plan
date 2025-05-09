@@ -1,220 +1,200 @@
-# gcp-continuous-deployment
+# GCP Continuous Deployment for Labware Flask API
 
-This is an example Flask application that you will use to explore the Continuous Deployment pipeline on GCP compute
-instances using Docker and GitHub workflows.
+This repository contains a simple Flask web application demonstrating the Continuous Deployment (CD) pipeline on Google Cloud Platform (GCP) Compute Engine instances using Docker and GitHub workflows.
 
 ## Prerequisites
 
-GCP instance and VPC network need to be configured to allow HTTP(S) traffic on both the pre-defined port (5000) for
-exposing the container and the instance itself for getting access to it using the `gcloud compute ssh` command.
+Before starting, ensure that the following are configured in your Google Cloud Platform (GCP) environment:
 
-You can use this Terraform [repository](https://github.com/warestack/terraform-gcp-compute-instance) to provision the
-minimum resources in GCP or create a compute instance and its VPC network and firewall rules using the Google cloud
-console.
+1. **GCP Instance and VPC Network**:
 
-## Init your development environment (on local machine)
+   * The GCP instance should allow HTTP(S) traffic on port 5000 to expose the container and enable SSH access using the `gcloud compute ssh` command.
+   * You can either create a VM instance manually or use this [Terraform repository](https://github.com/warestack/terraform-gcp-compute-instance) to provision the necessary resources.
 
-Create a simple python application in your Visual Studio IDE and create a python script with the following code.
+2. **Google Cloud Project**:
+
+   * Ensure your GCP project is set up and the Compute Engine API is enabled.
+
+## Setting Up Your Local Development Environment
+
+### 1. Create a Simple Flask Application
+
+Create a Python script `app.py` with the following code to implement a basic Flask API for managing labware data:
 
 ```python
-from flask import Flask
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
+# In-memory data store for labware info
+labware_data = {}
 
-@app.route('/')
-def index():
-    return 'Hello, this is the version `1.0.0` of your flask app'
+@app.route('/labware', methods=['GET'])
+def get_labware():
+    # Returns the labware information
+    return jsonify(labware_data), 200
 
+@app.route('/labware', methods=['POST'])
+def add_labware():
+    # Gets the data sent in the POST request
+    new_labware = request.get_json()
 
-# When you containerize your Flask app using Docker and expose it to the outside world, you need to specify the host
-# parameter in the app.run() function to make the app accessible from outside the container.
+    # Validate labware name and type
+    if not new_labware.get('name') or not new_labware.get('type'):
+        return jsonify({'error': 'Missing labware name or type'}), 400
 
-# When you run a Flask app inside a Docker container, the default host value localhost refers only to the local
-# container, not to the outside world. To make a Flask app accessible from outside the container, you need to set the
-# host parameter to 0.0.0.0 so that it listens on all network interfaces.
+    # Add the new labware to the data store
+    labware_id = len(labware_data) + 1  # Generate ID based on current length
+    labware_data[labware_id] = new_labware
+
+    return jsonify({'message': 'Labware added successfully', 'id': labware_id}), 201
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True)
 ```
 
-In this example, we create a Web Application using the Flask framework in Python. The script creates a server and
-demonstrates how to print a simple message on the browser.
+This Flask application provides two endpoints:
 
-> Flask is a micro web framework written in Python. It is classified as a microframework because it does not require
-particular tools or libraries. It has no database abstraction layer, form validation, or any other components where
-pre-existing third-party libraries provide common functions.
+* `GET /labware` to retrieve the labware information.
+* `POST /labware` to add new labware data.
 
-### Test the app
+### 2. Install Flask
 
-To run the script on your machine, you will need to install Flask:
+Ensure Flask is installed on your local machine by running:
 
 ```bash
 pip install flask
 ```
 
-Then, you can run it using the following command:
+You can then run the application:
 
 ```bash
 python3 app.py
 ```
 
-### Init your Git repository
+### 3. Initialize a Git Repository
 
-Before you continue, you must install Git on your local machine. Follow the guide below to download and install Git,
-then return to this tutorial.
+Set up version control using Git by following these steps:
 
-* [Installation guide for Windows, Mac and Linux users](https://github.com/git-guides/install-git)
+1. **Initialize Git** in your project folder:
 
-> **<u>For Windows users</u>, please use the following step-by-step guide: https://phoenixnap.com/kb/how-to-install-git-windows** 
->
-> Install **git bash** and then restart your Visual Studio IDE.
+   ```bash
+   git init
+   ```
 
-Create a private repository and push it to GitHub following the commands below:
+2. **Add a remote repository** (replace `YOUR_GIT_USERNAME` and `YOUR_GIT_REPO` with your actual GitHub username and repository):
 
-1. Init an empty Git repository.
+   ```bash
+   git remote add origin https://YOUR_GIT_USERNAME:YOUR_GIT_TOKEN@YOUR_GIT_REPO
+   ```
 
-```bash
-$ git init
-```
+3. **Add and commit the files**:
 
-2. Add a new remote to your repo (this should be in one single line).
+   ```bash
+   git add .
+   git commit -m "Initial commit - Flask app"
+   ```
 
-```bash
-$ git remote add origin https://YOUR_GIT_USERNAME:YOUR_GIT_TOKEN@YOUR_GIT_REPO
-```
+4. **Push the code** to GitHub:
 
-* Add all files and folders.
+   ```bash
+   git push -f origin main
+   ```
 
-```bash
-$ git add . 
-```
+After pushing, you should be able to see your files in the GitHub repository.
 
-3. Commit the changes to the repo.
+## Deploying the Flask Application on GCP VM (Manually)
 
-```bash
-$ git commit -m "Create a sample web app"
-```
+### 1. Connect to Your GCP VM
 
-4. Upload local repository content to a remote repository.
+SSH into your GCP VM instance. You can use either the terminal or the "SSH" button on the Google Cloud Console.
 
-```bash
-$ git push -f origin main
-```
+### 2. Clone Your GitHub Repository
 
-> At this point, refresh your GitHub page; your files/folders should be there now!
->
-> Now, go to your VM in GCP!
-
-## Deploy the web application on your GCP VM (manually)
-
-1. Open a terminal connection to the GCP VM. You can connect from VSC or using the SSH button (in GCP).
-2. In the VM, make sure you are already logged in as docker-user (from Lab 5.1). 
-3. Let's clone our GitHub repo.
+Clone the repository containing the Flask application to your GCP VM:
 
 ```bash
-$ git clone --branch main https://YOUR_GIT_USERNAME:YOUR_GIT_TOKEN@YOUR_GIT_REPO
+git clone --branch main https://YOUR_GIT_USERNAME:YOUR_GIT_TOKEN@YOUR_GIT_REPO
 ```
 
-4. Your repo should now be in your VM; run `ls` to check it out.
+### 3. Build the Docker Image
+
+Navigate to your cloned repository and create a Docker image for the Flask app:
 
 ```bash
-$ ls
-
-flask-app
+cd flask-app
+docker build -t flask .
 ```
 
-5. Change the current working directory (move to the folder which contains the content of your repo).
+### 4. Run the Flask App in a Docker Container
+
+Run the Docker container on your VM and expose port 5000:
 
 ```bash
-$ cd flask-app
+docker run -d -p 5000:5000 flask
 ```
 
-6. Package your python scripts into a docker image.
+You can now access the Flask application by navigating to `http://<VM_PUBLIC_IP>:5000`.
 
-The Dockerfile is used for specifying a set of instructions to follow in order to assemble an image.
+## Continuous Deployment with GitHub Workflow
 
-_**Note: before building the image review the set of instructions in the Dockerfile using a text editor (e.g. `pico`)**_
+To automate the deployment of your Flask application using GitHub Actions, follow these steps:
 
-```bash
-# press ctrl+x to exit the editor
-pico Dockerfile
+### 1. Set Up GitHub Workflow
+
+Enable GitHub Actions in your repository. Navigate to the **Actions** tab and enable the workflow.
+
+### 2. Store Google Cloud Credentials
+
+Encode your Terraform service account JSON file in `BASE64` format and store it as a secret in GitHub, named `GCP_TF_SA_CREDS_BASE64`.
+
+### 3. Configure the GitHub Workflow
+
+Create a `build_and_deploy.yaml` file in `.github/workflows/`. The file will automate the deployment process. Here’s an example:
+
+```yaml
+name: Build and Deploy to GCP
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [created]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_ZONE: ${{ secrets.GCP_ZONE }}
+      INSTANCE_NAME: ${{ secrets.INSTANCE_NAME }}
+      REPO_URL: ${{ secrets.REPO_URL }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Google Cloud credentials
+      uses: google-github-actions/setup-gcloud@v0.2.0
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
+
+    - name: SSH into VM and deploy
+      run: |
+        gcloud compute ssh ${{ secrets.INSTANCE_NAME }} --zone ${{ secrets.GCP_ZONE }} --command="cd /path/to/app && git pull && docker-compose up -d"
 ```
 
-It's to build the image now!
-```bash
-$  docker build -t flask .
-```
+### 4. Monitor the Deployment
 
-13. Run the container using the newly created image abd expose it to the port 5000.
-
-```bash
-$ docker run -d -p 5000:5000 flask
-```
-
-> `-d` run process in the background. 
-
-14. Try to access your service in the browser; you just created your first containerised app!:checkered_flag: Well done! 
-
-## Continuous Deployment of the web application on your GCP VM (using the GitHub workflow)
-
-1. Enable GitHub workflows, navigate to the **Actions** page of the repository and enable the main workflow.
-2. Encode the content of the Terraform service account JSON file in `BASE64` format and store it as a secret named
-   `GCP_TF_SA_CREDS_BASE64` on GitHub, in a new GitHub environment with protection rules is preferred. See the following
-   [link](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)
-   for setting a new GitHub environment. If you do so, make sure that the right environment is defined in the 
-   `build_and_deploy.yaml` workflow. You can find instructions on how to create the service account 
-   [here](https://github.com/warestack/terraform-gcp-compute-instance#google-apis-and-iam-roles).
-
-    ```yaml
-    name: Setup, Build, Deploy and Publish
-    on:
-      push:
-        branches:
-          - 'main'
-      release:
-        types: [created]
-    
-    jobs:
-      setup-build-deploy-publish:
-        name: Setup, Build, Deploy and Publish
-        runs-on: ubuntu-latest
-        environment: <your_new_environment>
-        env:
-          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          GCP_ZONE: ${{ secrets.GCP_ZONE }}
-          INSTANCE_NAME: ${{ secrets.INSTANCE_NAME }}
-          IMAGE_NAME: docker-image
-          CONTAINER_NAME: docker-container
-          WORKING_DIR: app
-          GITHUB_REPO_URL: ${{ secrets.REPO_URL }}
-        steps:
-          # ...workflow-specific steps
-    ```
-   
-4. Create the `GCP_PROJECT_ID`, `GCP_ZONE`, `INSTANCE_NAME` and `REPO_URL` on GitHub or set the env variables directly
-   in the `build_and_deploy.yaml` workflow as these variables are not confidential.
-5. Push the main branch (`force push` if you have not applied any change) to trigger the workflow. You can use the 
-   GitHub workflow status page to monitor the progress of the workflow.
-
-## For any questions, suggestions, or feature requests
-
-Get in touch with us:
-
-- Email [dimitris@waresatck.io](mailto:dimitris@warestack.io?subject=[GitHub]%20Source%20Han%20Sans),
-  [stelios@waresatck.io](mailto:stelios@warestack.io?subject=[GitHub]%20Source%20Han%20Sans)
-- [LinkedIn account](https://www.linkedin.com/in/dimitris-kargatzis-1385a2101/)
+After pushing changes to the main branch, the workflow will automatically trigger. You can monitor the progress of the deployment in the GitHub Actions tab.
 
 ## License
 
-License under the MIT License (MIT)
+This project is licensed under the MIT License. See the LICENSE file for more information.
 
-Copyright © 2022 [Warestack, ltd](https://github.com/warestack)
+---
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Let me know if you need further adjustments!
